@@ -1,131 +1,136 @@
-# PawPal+ Project Reflection
+# 🐾 PawPal+ Project Reflection
+
+---
 
 ## 1. System Design
 
-**a. Initial design**
+### a. Initial Design
 
-- Briefly describe your initial UML design.
-  
-The three main actions a user should be able to perform are:
+The system was designed around three core user actions:
 
-- Add a pet — the owner needs to register their animal with basic details like name and species so the system knows who it is managing care for.
-- Schedule a care task — the owner should be able to create activities like walks, feedings, or medications with a time, duration, and priority level so the system can plan around them.
-- View today's plan — the owner needs to see a clear, prioritised daily schedule that fits within their available time, so they know exactly what to do and in what order.
+- **Adding a pet** — allowing the owner to register animals with basic identifying information  
+- **Scheduling care tasks** — including time, duration, priority, and frequency  
+- **Viewing a daily plan** — presenting a clear, prioritized schedule within the owner's time constraints  
 
+To support these actions, I designed four classes: **Task, Pet, Owner, and Scheduler**.
 
-- What classes did you include, and what responsibilities did you assign to each?
-  
-To support this, I designed four classes: Task, Pet, Owner, and Scheduler.
-Task holds all the details of a single care activity — what it is, when it happens, how long it takes, how urgent it is, and how often it repeats. Pet stores the animal's identity and owns a list of its tasks. Owner represents the human user — they have a daily time budget and a list of pets, but they don't manage tasks directly. Scheduler is the brain: it takes an Owner and does all the algorithmic work like sorting, filtering, and planning.
+- **Task** represents a single care activity and stores attributes such as time, duration, priority, frequency, due date, and completion status.  
+- **Pet** acts as a container for tasks and represents a single animal.  
+- **Owner** manages multiple pets and defines the available time budget.  
+- **Scheduler** is the central logic component responsible for sorting, filtering, conflict detection, and scheduling.  
 
-I kept Scheduler as a plain class instead of a dataclass because it holds logic, not stored data. The relationships flow downward: Owner contains Pets, Pets contain Tasks, and Scheduler sits outside that hierarchy — it references an Owner to do its work without being part of the data model.
+The relationships are hierarchical: an Owner contains Pets, Pets contain Tasks, and the Scheduler operates externally as a controller. This separation keeps the data model clean and focused.
 
+---
 
-**b. Design changes**
+### b. Design Changes
 
-- Did your design change during implementation?
-- If yes, describe at least one change and why you made it.
+During implementation, I made several refinements:
 
-After generating the skeleton with Copilot, I made two changes based on review.
-
-At first, I didn’t think I needed a duration attribute on Task, but I realized the scheduler wouldn’t work without it. Without knowing how long each task takes, the system can’t determine whether tasks fit within the owner’s available time. I added duration to make generate_daily_plan() functional.
-
-Second, I confirmed that the tasks and pets lists use field(default_factory=list) rather than a plain list default. This avoids a shared-state bug in Python dataclasses where all instances would share the same list object if a mutable default is used directly.
-
-I also noticed that mark_complete() is currently documented as only flipping the completion flag, but in Phase 2 it will also need to create the next occurrence for daily and weekly recurring tasks. I flagged this docstring for revision rather than leaving it as a permanent description of incomplete behavior.
+- I added a **duration attribute** to the Task class. Without duration, the scheduler could not determine whether tasks fit within the owner's time budget.  
+- I ensured all mutable fields used `field(default_factory=list)` to avoid shared state issues in Python dataclasses.  
+- I updated the role of `mark_complete()`, which evolved from a simple flag update to supporting recurring task workflows via the Scheduler.  
 
 ---
 
 ## 2. Scheduling Logic and Tradeoffs
 
-**a. Constraints and priorities**
+### a. Constraints and Priorities
 
-- What constraints does your scheduler consider (for example: time, priority, preferences)
-  
-  The scheduler considers two main constraints: priority level and the owner's available time budget. Tasks are ranked High, Medium, and Low. Within the same priority tier, earlier scheduled time is used as a tiebreaker. Tasks are only included in the daily plan if they fit within the owner's available_minutes — anything that doesn't fit is moved to an overflow list rather than silently dropped.
+The scheduler considers two main constraints:
 
-- How did you decide which constraints mattered most?
+- **Priority level (High → Medium → Low)**  
+- **Available time budget**
 
-I chose priority as the primary sort key because the scenario describes a busy owner. When time is limited, the system should protect High priority items like medications and meals before considering enrichment or grooming activities.
+Tasks are sorted first by priority and then by scheduled time. A **greedy algorithm** is used to add tasks sequentially until the time budget is reached. Remaining tasks are placed in an overflow list.
 
-**b. Tradeoffs**
+Priority was chosen as the dominant constraint because the system is designed for a busy user, ensuring critical tasks are always scheduled first.
 
-- Describe one tradeoff your scheduler makes.
-  
-  The scheduler uses exact time-string matching for conflict detection — two tasks conflict only if their time strings are identical, such as two tasks both scheduled at "09:00". This means a 30-minute task at 09:00 and a task at 09:15 are not flagged as a conflict even though they overlap in real time.
+---
 
-- Why is that tradeoff reasonable for this scenario?
+### b. Tradeoffs
 
-This is a deliberate simplification. Implementing true interval-based overlap detection would require converting time strings to datetime objects and comparing ranges, which adds complexity that is not necessary for a first version. The current approach still catches the most common real conflicts, like accidentally scheduling two feedings at the same time. A future version should upgrade to interval-based detection.
+The scheduler uses **exact time-string matching** for conflict detection.
+
+- Tasks only conflict if they share the same start time (e.g., both at "09:00")  
+- It does NOT detect overlapping intervals (e.g., 09:00–09:30 vs 09:15)
+
+This simplification keeps the implementation readable and efficient for an initial version, while still catching common scheduling mistakes.
 
 ---
 
 ## 3. AI Collaboration
 
-**a. How you used AI**
+### a. How AI Was Used
 
-- How did you use AI tools during this project (for example: design brainstorming, debugging, refactoring)?
+AI (Copilot) was used primarily during the design phase:
 
-I used Copilot at two specific points in Phase 1.
-First, I gave Copilot a description of my four classes with their attributes and methods and asked it to generate a Mermaid.js class diagram. This let me visually verify that the relationships — Owner contains Pets, Pets contain Tasks, Scheduler references Owner — matched my design intent before writing any code.
+- Generated a **Mermaid.js UML diagram** from class descriptions  
+- Produced **docstrings** across the codebase  
 
-- What kinds of prompts or questions were most helpful?
+Providing full file context improved the quality and consistency of AI-generated output.
 
- after writing my skeleton, I used Copilot's Generate Documentation feature to produce docstrings for every class and method. The most useful prompt pattern was giving Copilot the full file with context rather than one method at a time, because it could then write docstrings that referenced how each method connects to the rest of the system.
+---
 
+### b. Judgment and Verification
 
-**b. Judgment and verification**
+Not all AI suggestions were accepted:
 
-- Describe one moment where you did not accept an AI suggestion as-is.
-
-I did not accept the generated docstrings as final without review. The most important example was mark_complete(). Copilot documented it as: "This flips the completion flag so scheduling logic can treat the task as done." That is accurate for the skeleton, but incomplete for the final system — in Phase 2, mark_complete() will also need to return a new Task for recurring activities. I kept the docstring for now but flagged it explicitly for revision after Phase 2 implementation, rather than leaving a misleading description in place permanently.
-
-- How did you evaluate or verify what the AI suggested?
-  
-I also rejected an earlier Copilot suggestion to use a heapq priority queue for sorting tasks. While technically correct, the task list for a single pet owner will never be large enough to need that data structure, and the code would be significantly harder to read and explain. I used sorted() with a lambda key instead, which does the same job in one readable line.
+- I rejected the use of a **heapq priority queue** because it added unnecessary complexity  
+- I chose `sorted()` with a lambda function for better readability  
+- I reviewed and adjusted AI-generated docstrings, especially for evolving methods like `mark_complete()`  
 
 ---
 
 ## 4. Testing and Verification
 
-**a. What you tested**z
+### a. What Was Tested
 
-- What behaviors did you test?
+I tested the following behaviors:
 
-I tested five categories of behavior: task completion and recurrence, pet task management, sorting correctness, conflict detection, and daily plan constraints.
+- Task completion and recurrence  
+- Task addition to pets  
+- Sorting correctness  
+- Conflict detection  
+- Daily plan time constraints  
 
-- Why were these tests important?
+These tests ensure the scheduler behaves correctly in both normal and edge cases.
 
-Task completion and recurrence was the most critical to test because a bug there would cause tasks to silently disappear or duplicate uncontrollably. Conflict detection was important to verify both directions — that same-time tasks produce a warning and that different-time tasks do not. The daily plan tests confirmed that the scheduler never exceeds the owner's available_minutes and that High priority tasks are scheduled before lower priority ones when the budget is tight.
+---
 
+### b. Confidence
 
-**b. Confidence**
+I am confident in the core functionality of the system.
 
-- How confident are you that your scheduler works correctly?
-- What edge cases would you test next if you had more time?
+Future tests could include:
 
-The happy paths and most important edge cases are covered. Tests I would add next include: a pet with zero tasks to ensure no crashes on empty lists, two pets with conflicting tasks at the same time since current detection is per-pet only, a task whose due_date is in the future to verify it is excluded from the daily plan, and recurrence across a month boundary to catch date arithmetic edge cases like January 31 plus one day.
-
-I am confident in the basic functionality, but I would test edge cases like overlapping tasks or limited time.
+- Pets with no tasks  
+- Overlapping task intervals  
+- Tasks with future due dates  
+- Date edge cases (e.g., end-of-month recurrence)  
 
 ---
 
 ## 5. Reflection
 
-**a. What went well**
+### a. What Went Well
 
-- What part of this project are you most satisfied with?
+The separation between the **data layer** and the **logic layer** worked extremely well.
 
-The clean separation between the data layer (Task, Pet, Owner) and the logic layer (Scheduler) worked well from the start. Because all scheduling logic lived in one place, I could verify the backend was correct by running main.py in the terminal before writing a single line of Streamlit UI. This CLI-first workflow made bugs much easier to isolate and fix.
+Using a **CLI-first workflow** allowed me to validate the backend logic before integrating the UI, making debugging easier and more efficient.
 
-**b. What you would improve**
+---
 
-- If you had another iteration, what would you improve or redesign?
+### b. What I Would Improve
 
-I would upgrade the conflict detection from exact time-string matching to interval-based detection. The current approach flags two tasks at "09:00" but misses a 30-minute task at "09:00" overlapping with a task at "09:15". The data is already there — every Task has both a time and a duration — so this is purely an algorithmic upgrade that would make the conflict warnings genuinely reliable.
+I would implement **interval-based conflict detection** to handle overlapping tasks more accurately. The system already contains the necessary data (time and duration), so this would be a natural next step.
 
-**c. Key takeaway**
+---
 
-- What is one important thing you learned about designing systems or working with AI on this project?
+### c. Key Takeaway
 
-The most important thing I learned was that AI is most useful as a design reviewer early in the process, not just a code generator. When I used Copilot to challenge my class structure and generate the UML diagram before writing any code, it surfaced design questions that were much cheaper to answer at that stage. By contrast, asking AI to generate code late in the project produced output that needed significant review and revision. The lesson is to front-load AI collaboration on design and reasoning, and be more selective when it comes to accepting implementation suggestions directly.
+AI is most effective as a **design collaborator**, not just a code generator.
+
+Using AI early in the process helped validate system architecture, while later-stage suggestions required careful review to maintain clarity and simplicity.
+
+---

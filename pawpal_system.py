@@ -1,13 +1,10 @@
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 
 
 @dataclass
 class Task:
     """Represent a scheduled pet care task with timing, duration, and repetition details.
-
-    This class describes individual care activities so they can be tracked,
-    planned, and completed over time.
 
     Attributes:
         description: A short description of the care activity.
@@ -27,21 +24,13 @@ class Task:
     is_complete: bool = False
 
     def mark_complete(self):
-        """Mark the task as completed for its current due date.
-
-        This flips the completion flag so scheduling logic can treat
-        the task as done. Will be updated in Phase 2 to also create
-        the next occurrence for recurring tasks.
-        """
+        """Mark the task as completed for its current due date."""
         self.is_complete = True
 
 
 @dataclass
 class Pet:
     """Represent a single animal and the care tasks associated with it.
-
-    This class groups care activities under one pet so scheduling can
-    be organized by animal.
 
     Attributes:
         name: The pet's name as shown to the owner.
@@ -53,19 +42,11 @@ class Pet:
     tasks: list[Task] = field(default_factory=list)
 
     def add_task(self, task: Task):
-        """Attach a new care task to this pet.
-
-        This records the activity in the pet's task list so it can
-        be scheduled and tracked.
-        """
+        """Attach a new care task to this pet."""
         self.tasks.append(task)
 
     def remove_task(self, task: Task):
-        """Detach an existing care task from this pet.
-
-        This removes the activity from the pet's task list so it is
-        no longer scheduled.
-        """
+        """Detach an existing care task from this pet."""
         if task in self.tasks:
             self.tasks.remove(task)
 
@@ -74,13 +55,9 @@ class Pet:
 class Owner:
     """Represent a human user who cares for one or more pets.
 
-    This class holds the owner's time budget and the pets they manage
-    so scheduling can respect daily limits.
-
     Attributes:
         name: The owner's display name.
-        available_minutes: How many minutes the owner can spend on
-            pet care in a typical day.
+        available_minutes: How many minutes the owner can spend on pet care per day.
         pets: The list of pets that belong to this owner.
     """
     name: str
@@ -88,131 +65,134 @@ class Owner:
     pets: list[Pet] = field(default_factory=list)
 
     def add_pet(self, pet: Pet):
-        """Register a new pet under this owner.
-
-        This adds the pet to the owner's collection so its tasks are
-        included in scheduling.
-        """
+        """Register a new pet under this owner."""
         self.pets.append(pet)
 
-    def get_all_tasks(self) -> list:
-        """Collect all tasks across all of the owner's pets.
-
-        This flattens each pet's task list into a single list so the
-        scheduler can plan the day.
-        """
-        tasks = []
+    def get_all_tasks(self) -> list[tuple[str, Task]]:
+        """Collect all tasks across all pets as (pet_name, task) tuples."""
+        result = []
         for pet in self.pets:
-            tasks.extend(pet.tasks)
-        return tasks
+            for task in pet.tasks:
+                result.append((pet.name, task))
+        return result
 
 
 class Scheduler:
     """Coordinate and plan pet care tasks for a single owner.
-
-    This class inspects the owner's pets and tasks to sort, filter,
-    and build a conflict-aware daily schedule.
 
     Attributes:
         owner: The owner whose pets and tasks are being scheduled.
     """
 
     def __init__(self, owner: Owner):
-        """Create a scheduler bound to a specific owner.
-
-        This stores the owner so later methods can read their pets,
-        tasks, and time limits.
-        """
+        """Create a scheduler bound to a specific owner."""
         self.owner = owner
 
-    def sort_by_time(self) -> list:
-        """Return all tasks for the owner ordered by scheduled time.
-
-        Sorts using the HH:MM string directly — alphabetical order on
-        zero-padded time strings is the same as chronological order.
-        """
+    def sort_by_time(self) -> list[tuple[str, Task]]:
+        """Return all tasks ordered by scheduled time as (pet_name, task) tuples."""
         tasks = self.owner.get_all_tasks()
-        return sorted(tasks, key=lambda t: t.time)
+        return sorted(tasks, key=lambda pair: pair[1].time)
 
-    def filter_tasks(self, pet_name=None, status=None) -> list:
-        """Select tasks that match the given pet name and status.
+    def filter_tasks(self, pet_name: str = None, status: str = None) -> list[tuple[str, Task]]:
+        """Select tasks matching the given pet name and/or completion status.
 
-        Pass pet_name to restrict results to one animal.
-        Pass status as 'complete' or 'pending' to filter by completion.
-        Omit both to return all tasks.
+        Returns list of (pet_name, task) tuples.
         """
-        # Start from pet-specific list if a name is given,
-        # otherwise use all tasks across all pets
         if pet_name:
             tasks = [
-                task
-                for pet in self.owner.pets
-                if pet.name == pet_name
-                for task in pet.tasks
+                (pname, task)
+                for pname, task in self.owner.get_all_tasks()
+                if pname == pet_name
             ]
         else:
             tasks = self.owner.get_all_tasks()
 
-        # Apply completion filter if requested
         if status == "complete":
-            tasks = [t for t in tasks if t.is_complete]
+            tasks = [(pname, t) for pname, t in tasks if t.is_complete]
         elif status == "pending":
-            tasks = [t for t in tasks if not t.is_complete]
+            tasks = [(pname, t) for pname, t in tasks if not t.is_complete]
 
         return tasks
 
-    def detect_conflicts(self) -> list:
-        """Identify tasks scheduled at the same time.
-
-        Returns a list of (task_a, task_b) tuples where both tasks
-        share the same HH:MM time string. Uses exact-match only —
-        interval-based overlap is a known limitation for Phase 4.
-        """
-        tasks = self.sort_by_time()
+    def detect_conflicts(self) -> list[str]:
+        """Identify tasks scheduled at the same time and return warning strings."""
+        sorted_tasks = self.sort_by_time()
         conflicts = []
-        seen_times = {}
+        seen: dict = {}
 
-        for task in tasks:
-            if task.time in seen_times:
-                # Found two tasks at the same time — flag as conflict
-                conflicts.append((seen_times[task.time], task))
+        for pet_name, task in sorted_tasks:
+            if task.time in seen:
+                prev_pet, prev_task = seen[task.time]
+                conflicts.append(
+                    f"⚠️  CONFLICT at {task.time}: "
+                    f"'{prev_task.description}' ({prev_pet}) "
+                    f"vs '{task.description}' ({pet_name})"
+                )
             else:
-                seen_times[task.time] = task
+                seen[task.time] = (pet_name, task)
 
         return conflicts
 
     def generate_daily_plan(self) -> dict:
         """Build a feasible daily care plan within the owner's time budget.
 
-        Sorts tasks by priority (High first), then by time within each
-        priority tier. Greedily adds tasks until available_minutes is
-        exhausted. Tasks that do not fit go into the overflow list.
-
-        Returns a dict with keys:
-            scheduled    — tasks that fit within the time budget
-            overflow     — tasks that were skipped due to time limits
-            total_time_used — total minutes consumed by scheduled tasks
+        Returns dict with keys:
+            scheduled         — (pet_name, task) tuples that fit
+            overflow          — (pet_name, task) tuples that didn't fit
+            used_minutes      — total minutes consumed
+            available_minutes — the owner's daily budget
         """
         tasks = self.owner.get_all_tasks()
-
-        # Priority sort: High=0, Medium=1, Low=2, then time as tiebreaker
         priority_order = {"High": 0, "Medium": 1, "Low": 2}
-        tasks.sort(key=lambda t: (priority_order.get(t.priority, 3), t.time))
+        tasks.sort(key=lambda pair: (priority_order.get(pair[1].priority, 3), pair[1].time))
 
         scheduled = []
         overflow = []
-        total_time = 0
+        used = 0
 
-        for task in tasks:
-            if total_time + task.duration <= self.owner.available_minutes:
-                scheduled.append(task)
-                total_time += task.duration
+        for pet_name, task in tasks:
+            if used + task.duration <= self.owner.available_minutes:
+                scheduled.append((pet_name, task))
+                used += task.duration
             else:
-                # Task does not fit — move to overflow rather than drop silently
-                overflow.append(task)
+                overflow.append((pet_name, task))
 
         return {
             "scheduled": scheduled,
             "overflow": overflow,
-            "total_time_used": total_time,
+            "used_minutes": used,
+            "available_minutes": self.owner.available_minutes,
         }
+
+    def handle_recurring(self, task: Task, pet: Pet) -> Task | None:
+        """Mark a task complete and schedule the next occurrence if recurring.
+
+        Returns the new Task if created, or None for one-time tasks.
+        """
+        task.mark_complete()
+
+        if task.frequency == "daily":
+            next_task = Task(
+                description=task.description,
+                time=task.time,
+                duration=task.duration,
+                priority=task.priority,
+                frequency=task.frequency,
+                due_date=task.due_date + timedelta(days=1),
+            )
+            pet.add_task(next_task)
+            return next_task
+
+        elif task.frequency == "weekly":
+            next_task = Task(
+                description=task.description,
+                time=task.time,
+                duration=task.duration,
+                priority=task.priority,
+                frequency=task.frequency,
+                due_date=task.due_date + timedelta(weeks=1),
+            )
+            pet.add_task(next_task)
+            return next_task
+
+        return None
